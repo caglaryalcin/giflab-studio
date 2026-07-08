@@ -34,6 +34,7 @@ import {
 } from "react";
 import type {
   GifCatalogResponse,
+  GifCategorySummary,
   GifCollection,
   GifCollectionStore,
   GifBackgroundMode,
@@ -54,6 +55,7 @@ type CollectionSyncState = "loading" | "saving" | "saved" | "error";
 type CollectionDialogMode = "add" | "create";
 type CatalogPageRequest = {
   append: boolean;
+  category: string;
   forceRefresh?: boolean;
   offset: number;
   queryText: string;
@@ -132,6 +134,8 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
   const [items, setItems] = useState<GifItem[]>(initialItems);
   const [total, setTotal] = useState(initialItems.length);
   const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState("");
+  const [categories, setCategories] = useState<GifCategorySummary[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [collections, setCollections] = useState<GifCollection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState("");
@@ -182,6 +186,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
 
   const requestCatalogPage = useCallback(async ({
     append,
+    category,
     forceRefresh = false,
     offset,
     queryText,
@@ -206,6 +211,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
       });
 
       if (queryText) params.set("query", queryText);
+      if (category) params.set("category", category);
       if (forceRefresh) params.set("refresh", "1");
 
       const response = await fetch(`/api/gifs?${params.toString()}`, {
@@ -224,6 +230,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
       setItems((currentItems) =>
         append ? mergeCatalogItems(currentItems, data.items) : data.items,
       );
+      setCategories(data.categories);
       setTotal(data.total);
     } catch (requestError) {
       if (!signal?.aborted && requestId === catalogRequestIdRef.current) {
@@ -364,6 +371,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
     const timer = window.setTimeout(async () => {
       await requestCatalogPage({
         append: false,
+        category: activeCategory,
         offset: 0,
         queryText: query.trim(),
         signal: controller.signal,
@@ -374,7 +382,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query, requestCatalogPage]);
+  }, [activeCategory, query, requestCatalogPage]);
 
   const activeCollection = useMemo(
     () => collections.find((collection) => collection.id === activeCollectionId) ?? null,
@@ -402,16 +410,18 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
   );
   const visibleItems = showCollectionOnly && activeCollection ? collectionItems : items;
   const canLoadMore = !showCollectionOnly && items.length < total;
+  const activeCategoryCount = categories.find((category) => category.name === activeCategory)?.count ?? total;
 
   const loadMoreCatalog = useCallback(() => {
     if (!canLoadMore || loading || loadingMore) return;
 
     void requestCatalogPage({
       append: true,
+      category: activeCategory,
       offset: items.length,
       queryText: query.trim(),
     });
-  }, [canLoadMore, items.length, loading, loadingMore, query, requestCatalogPage]);
+  }, [activeCategory, canLoadMore, items.length, loading, loadingMore, query, requestCatalogPage]);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -942,6 +952,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
               onClick={() => {
                 void requestCatalogPage({
                   append: false,
+                  category: activeCategory,
                   forceRefresh: true,
                   offset: 0,
                   queryText: query.trim(),
@@ -996,8 +1007,9 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
             </label>
 
             <button
-              className={!showCollectionOnly ? "gif-sidebar-link is-active" : "gif-sidebar-link"}
+              className={!showCollectionOnly && !activeCategory ? "gif-sidebar-link is-active" : "gif-sidebar-link"}
               onClick={() => {
+                setActiveCategory("");
                 setShowCollectionOnly(false);
                 setCollectionEditorOpen(false);
               }}
@@ -1007,6 +1019,47 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
               <span>All GIFs</span>
               <small>{formatNumber(total)}</small>
             </button>
+
+            <div className="gif-sidebar-section">
+              <span className="gif-sidebar-section__header">Categories</span>
+              {categories.length > 0 ? (
+                <div className="gif-sidebar-categories" aria-label="GIF categories">
+                  <button
+                    className={!activeCategory ? "gif-sidebar-category is-active" : "gif-sidebar-category"}
+                    onClick={() => {
+                      setActiveCategory("");
+                      setShowCollectionOnly(false);
+                      setCollectionEditorOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <span>All categories</span>
+                    <small>{formatNumber(categories.reduce((sum, category) => sum + category.count, 0))}</small>
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      className={
+                        activeCategory === category.name
+                          ? "gif-sidebar-category is-active"
+                          : "gif-sidebar-category"
+                      }
+                      key={category.name}
+                      onClick={() => {
+                        setActiveCategory(category.name);
+                        setShowCollectionOnly(false);
+                        setCollectionEditorOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <span>{category.name}</span>
+                      <small>{formatNumber(category.count)}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="gif-collection-empty">No categories yet.</p>
+              )}
+            </div>
 
             <div className="gif-sidebar-section">
               <button
@@ -1074,6 +1127,8 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
                 <h1>
                   {showCollectionOnly && activeCollection
                     ? formatCollectionTitle(activeCollection.name)
+                    : activeCategory
+                      ? activeCategory
                     : (
                       <>
                         Popular <span>/ Wired</span>
@@ -1095,6 +1150,8 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
                 <span className="gif-pill">
                   {showCollectionOnly
                     ? `${formatNumber(visibleItems.length)} visible`
+                    : activeCategory
+                      ? `${formatNumber(items.length)} / ${formatNumber(activeCategoryCount)} in category`
                     : `${formatNumber(items.length)} / ${formatNumber(total)} loaded`}
                 </span>
               </div>

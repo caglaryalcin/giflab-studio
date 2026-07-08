@@ -1,0 +1,11 @@
+
+> giflab-studio@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.1 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://169.254.83.107:3000
+✓ Ready in 308ms
+
+ GET / 200 in 1004ms (next.js: 867ms, application-code: 137ms)
+ GET / 200 in 33ms (next.js: 3ms, application-code: 30ms)

@@ -19,12 +19,19 @@ export interface GifCatalogSource {
 }
 
 export interface GifCatalogResponse {
+  categories: GifCategorySummary[];
+  category: string;
   items: GifItem[];
   total: number;
   offset: number;
   limit: number;
   query: string;
   source: GifCatalogSource;
+}
+
+export interface GifCategorySummary {
+  count: number;
+  name: string;
 }
 
 export interface GifCollection {
@@ -41,6 +48,7 @@ export interface GifCollectionStore {
 }
 
 export interface CatalogQuery {
+  category?: string;
   refresh?: boolean;
   query?: string;
   offset?: number;

@@ -3,7 +3,14 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { demoCatalogItems } from "@/lib/demo-catalog";
 import { getGifCacheFile, writeCacheFile } from "@/lib/gif-cache";
-import type { CatalogQuery, GifCatalogResponse, GifCatalogSource, GifIndexSummary, GifItem } from "@/types";
+import type {
+  CatalogQuery,
+  GifCatalogResponse,
+  GifCatalogSource,
+  GifCategorySummary,
+  GifIndexSummary,
+  GifItem,
+} from "@/types";
 
 export type ArchiveItem = GifItem & {
   absolutePath: string;
@@ -77,7 +84,7 @@ type LoadArchiveOptions = {
 };
 
 const gifExtension = ".gif";
-const manifestVersion = 1;
+const manifestVersion = 2;
 const defaultLimit = 72;
 const maxLimit = 240;
 const cacheMs = Number.parseInt(process.env.GIF_CATALOG_CACHE_MS ?? "30000", 10);
@@ -91,10 +98,11 @@ export async function getGifCatalog(query: CatalogQuery = {}): Promise<GifCatalo
   const sourceItems: GifItem[] = hasArchiveItems ? archive.items.map(stripInternalFields) : demoCatalogItems;
   const source = createSource(archive, hasArchiveItems);
   const normalizedQuery = query.query?.trim().toLowerCase() ?? "";
+  const normalizedCategory = query.category?.trim() ?? "";
   const limit = clampNumber(query.limit ?? defaultLimit, 1, maxLimit);
   const offset = Math.max(0, query.offset ?? 0);
 
-  const filtered = sourceItems.filter((item) => {
+  const queryFiltered = sourceItems.filter((item) => {
     const queryMatch =
       normalizedQuery.length === 0 ||
       [item.title, item.fileName, item.category]
@@ -104,8 +112,14 @@ export async function getGifCatalog(query: CatalogQuery = {}): Promise<GifCatalo
 
     return queryMatch;
   });
+  const categories = createCategorySummaries(queryFiltered);
+  const filtered = normalizedCategory
+    ? queryFiltered.filter((item) => item.category === normalizedCategory)
+    : queryFiltered;
 
   return {
+    categories,
+    category: normalizedCategory,
     items: filtered.slice(offset, offset + limit),
     total: filtered.length,
     offset,
@@ -321,7 +335,7 @@ async function createArchiveItem(
   if (!fileStats?.isFile()) return null;
 
   const id = createId(file.relativePath);
-  const category = toCategory(file.relativePath);
+  const category = toFileNameCategory(file.fileName);
   const src = usesFileProxy ? `/api/gifs/file/${id}` : toPublicSrc(publicRoot, file.absolutePath);
 
   return {
@@ -542,9 +556,25 @@ function toRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function toCategory(relativePath: string): string {
-  const segments = relativePath.split(path.sep).filter(Boolean);
-  return segments.length > 1 ? toTitle(segments[0]) : "General";
+function createCategorySummaries(items: GifItem[]): GifCategorySummary[] {
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+  }
+
+  return Array.from(counts, ([name, count]) => ({ count, name }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+function toFileNameCategory(fileName: string): string {
+  const baseName = path.basename(fileName, gifExtension);
+  const firstMeaningfulSegment = baseName
+    .split(/[_.\-\s()[\]]+/)
+    .map((segment) => segment.trim())
+    .find((segment) => segment.length > 0 && !/^\d+$/.test(segment));
+
+  return firstMeaningfulSegment ? toTitle(firstMeaningfulSegment) : "General";
 }
 
 function toTitle(value: string): string {

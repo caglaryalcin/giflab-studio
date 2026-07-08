@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
   }
 
   const response = await getGifCatalog({
+    category: params.get("category") ?? undefined,
     query: params.get("query") ?? undefined,
     offset: parseInteger(params.get("offset")),
     limit: parseInteger(params.get("limit")),
