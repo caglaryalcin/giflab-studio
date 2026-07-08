@@ -1,5 +1,5 @@
 import { getArchiveIndexSummary, refreshGifArchive } from "@/lib/gif-catalog";
-import { getGifIndexStatus, startGifIndexJob } from "@/lib/gif-index-status";
+import { getLatestGifIndexStatus, startGifIndexJob } from "@/lib/gif-index-status";
 import type { GifIndexStatus, GifIndexSummary } from "@/types";
 
 export const runtime = "nodejs";
@@ -33,7 +33,7 @@ export async function POST() {
 async function createStatusResponse() {
   const [summary, status] = await Promise.all([
     getArchiveIndexSummary(),
-    Promise.resolve(getGifIndexStatus()),
+    getLatestGifIndexStatus(),
   ]);
 
   return {

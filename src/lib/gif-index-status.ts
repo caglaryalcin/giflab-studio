@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import type { ArchiveIndexResult, ArchiveScanProgress } from "@/lib/gif-catalog";
+import { getGifCacheFile, writeCacheFile } from "@/lib/gif-cache";
 import type { GifIndexStatus } from "@/types";
 
 type GifIndexState = {
@@ -20,6 +22,8 @@ const globalIndexState = globalThis as typeof globalThis & {
   __giflabIndexState?: GifIndexState;
 };
 
+const statusSnapshotStaleMs = 30000;
+
 const indexState = globalIndexState.__giflabIndexState ?? {
   promise: null,
   status: createIdleStatus(),
@@ -29,6 +33,16 @@ globalIndexState.__giflabIndexState = indexState;
 
 export function getGifIndexStatus(): GifIndexStatus {
   return cloneStatus(indexState.status);
+}
+
+export async function getLatestGifIndexStatus(): Promise<GifIndexStatus> {
+  const memoryStatus = getGifIndexStatus();
+  const persistedStatus = await readPersistedStatus();
+
+  if (!persistedStatus) return memoryStatus;
+  if (isRunningStatusStale(persistedStatus)) return memoryStatus;
+
+  return isStatusNewer(persistedStatus, memoryStatus) ? persistedStatus : memoryStatus;
 }
 
 export function startGifIndexJob(job: GifIndexJob): GifIndexJobStart {
@@ -171,6 +185,99 @@ function cloneStatus(status: GifIndexStatus): GifIndexStatus {
 
 function setStatus(status: GifIndexStatus): void {
   indexState.status = status;
+  void writePersistedStatus(status);
+}
+
+async function readPersistedStatus(): Promise<GifIndexStatus | null> {
+  try {
+    return parsePersistedStatus(await readFile(getStatusSnapshotPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function writePersistedStatus(status: GifIndexStatus): Promise<void> {
+  try {
+    await writeCacheFile(getStatusSnapshotPath(), JSON.stringify(status));
+  } catch {
+    // Live status is best-effort; indexing should continue even when the cache is read-only.
+  }
+}
+
+function getStatusSnapshotPath(): string {
+  return getGifCacheFile("status", "archive-index", "json");
+}
+
+function parsePersistedStatus(raw: string): GifIndexStatus | null {
+  const value = JSON.parse(raw) as unknown;
+
+  if (!isRecord(value)) return null;
+
+  const status: GifIndexStatus = {
+    completedAt: readString(value.completedAt),
+    currentPath: readString(value.currentPath),
+    discoveredFiles: readNumber(value.discoveredFiles),
+    durationMs: readNumber(value.durationMs),
+    error: readString(value.error),
+    indexedFiles: readNumber(value.indexedFiles),
+    message: readString(value.message),
+    pendingDirectories: readNumber(value.pendingDirectories),
+    phase: readPhase(value.phase),
+    progress: readNumber(value.progress),
+    rootLabel: readString(value.rootLabel),
+    running: value.running === true,
+    scannedDirectories: readNumber(value.scannedDirectories),
+    startedAt: readString(value.startedAt),
+    totalFiles: readNumber(value.totalFiles),
+    updatedAt: readString(value.updatedAt),
+  };
+
+  return status.message ? status : null;
+}
+
+function isStatusNewer(candidate: GifIndexStatus, current: GifIndexStatus): boolean {
+  return getStatusTimestamp(candidate) > getStatusTimestamp(current);
+}
+
+function isRunningStatusStale(status: GifIndexStatus): boolean {
+  if (!status.running) return false;
+
+  const updatedAt = Date.parse(status.updatedAt);
+  return !Number.isFinite(updatedAt) || Date.now() - updatedAt > statusSnapshotStaleMs;
+}
+
+function getStatusTimestamp(status: GifIndexStatus): number {
+  const updatedAt = Date.parse(status.updatedAt);
+  if (Number.isFinite(updatedAt)) return updatedAt;
+
+  const completedAt = Date.parse(status.completedAt);
+  if (Number.isFinite(completedAt)) return completedAt;
+
+  const startedAt = Date.parse(status.startedAt);
+  return Number.isFinite(startedAt) ? startedAt : 0;
+}
+
+function readPhase(value: unknown): GifIndexStatus["phase"] {
+  return value === "discovering" ||
+    value === "indexing" ||
+    value === "writing" ||
+    value === "ready" ||
+    value === "error" ||
+    value === "idle"
+    ? value
+    : "idle";
+}
+
+function readString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function readNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function getDurationMs(startedAt: string, now: string): number {

@@ -87,8 +87,8 @@ export function GifArchiveStatusPage() {
     };
   }, [data?.status.running, loadStatus]);
 
-  const status = data?.status ?? createEmptyStatus();
   const summary = data?.summary ?? createEmptySummary();
+  const status = normalizeDisplayStatus(data?.status ?? createEmptyStatus(), summary);
   const progressStyle = useMemo(
     () =>
       ({
@@ -329,6 +329,30 @@ function createEmptySummary(): GifIndexSummary {
     scannedAt: "",
     stale: true,
     usesFileProxy: false,
+  };
+}
+
+function normalizeDisplayStatus(status: GifIndexStatus, summary: GifIndexSummary): GifIndexStatus {
+  if (status.running || status.phase === "error" || !summary.exists) {
+    return status;
+  }
+
+  if (status.phase !== "idle" && status.progress > 0) {
+    return status;
+  }
+
+  return {
+    ...status,
+    completedAt: summary.scannedAt,
+    currentPath: "",
+    discoveredFiles: summary.count,
+    indexedFiles: summary.count,
+    message: `Indexed ${formatNumber(summary.count)} GIFs`,
+    phase: "ready",
+    progress: 100,
+    rootLabel: summary.rootLabel,
+    totalFiles: summary.count,
+    updatedAt: summary.scannedAt,
   };
 }
 

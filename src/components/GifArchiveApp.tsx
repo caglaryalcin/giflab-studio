@@ -135,7 +135,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
   const [total, setTotal] = useState(initialItems.length);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("");
-  const [categories, setCategories] = useState<GifCategorySummary[]>([]);
+  const [categories, setCategories] = useState<GifCategorySummary[]>(() => createCategorySummaries(initialItems));
   const [selectedId, setSelectedId] = useState("");
   const [collections, setCollections] = useState<GifCollection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState("");
@@ -230,7 +230,7 @@ export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
       setItems((currentItems) =>
         append ? mergeCatalogItems(currentItems, data.items) : data.items,
       );
-      setCategories(data.categories);
+      setCategories(readCatalogCategories(data, data.items));
       setTotal(data.total);
     } catch (requestError) {
       if (!signal?.aborted && requestId === catalogRequestIdRef.current) {
@@ -1892,22 +1892,37 @@ type NumberStepperProps = {
 };
 
 function HoverAnimatedGif({ isAnimating, item }: HoverAnimatedGifProps) {
+  const [loadedImageSrc, setLoadedImageSrc] = useState("");
   const [posterFailed, setPosterFailed] = useState(false);
 
   const posterVersion = encodeURIComponent(`${item.updatedAt}:${item.bytes}`);
   const posterSrc = item.origin === "archive" ? `/api/gifs/poster/${item.id}?v=${posterVersion}` : item.src;
   const usePoster = item.origin === "archive" && !posterFailed && !isAnimating;
+  const imageSrc = usePoster ? posterSrc : item.src;
+  const imageLoaded = loadedImageSrc === imageSrc;
+  const rememberLoadedImage = useCallback((node: HTMLImageElement | null) => {
+    if (node?.complete && node.naturalWidth > 0) {
+      setLoadedImageSrc(imageSrc);
+    }
+  }, [imageSrc]);
 
   return (
-    <img
-      alt={item.title}
-      decoding="async"
-      loading="lazy"
-      onError={() => {
-        if (usePoster) setPosterFailed(true);
-      }}
-      src={usePoster ? posterSrc : item.src}
-    />
+    <>
+      <img
+        alt={item.title}
+        className={imageLoaded ? "is-loaded" : ""}
+        decoding="async"
+        loading="lazy"
+        onError={() => {
+          if (usePoster) setPosterFailed(true);
+          setLoadedImageSrc("");
+        }}
+        onLoad={() => setLoadedImageSrc(imageSrc)}
+        ref={rememberLoadedImage}
+        src={imageSrc}
+      />
+      {!imageLoaded ? <span className="gif-card__image-loader" aria-hidden="true" /> : null}
+    </>
   );
 }
 
@@ -2443,6 +2458,24 @@ function mergeCatalogItems(currentItems: GifItem[], nextItems: GifItem[]): GifIt
   }
 
   return merged;
+}
+
+function readCatalogCategories(data: GifCatalogResponse, fallbackItems: GifItem[]): GifCategorySummary[] {
+  return Array.isArray(data.categories) && data.categories.length > 0
+    ? data.categories
+    : createCategorySummaries(fallbackItems);
+}
+
+function createCategorySummaries(items: GifItem[]): GifCategorySummary[] {
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    const category = item.category.trim() || "General";
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+
+  return Array.from(counts, ([name, count]) => ({ count, name }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
 function createEditorPayload(
