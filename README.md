@@ -39,12 +39,6 @@ Build the image:
 docker build -t giflab-studio .
 ```
 
-GitHub Actions publishes pushes on `main` to GitHub Container Registry:
-
-```powershell
-docker pull ghcr.io/<owner>/<repo>:latest
-```
-
 Run it with your local GIF archive mounted into the container:
 
 ```powershell
