@@ -1,5 +1,6 @@
 import { getArchiveIndexSummary, refreshGifArchive } from "@/lib/gif-catalog";
 import { getGifIndexStatus, startGifIndexJob } from "@/lib/gif-index-status";
+import type { GifIndexStatus, GifIndexSummary } from "@/types";
 
 export const runtime = "nodejs";
 
@@ -36,7 +37,31 @@ async function createStatusResponse() {
   ]);
 
   return {
-    status,
+    status: normalizeIndexStatus(status, summary),
     summary,
   };
+}
+
+function normalizeIndexStatus(status: GifIndexStatus, summary: GifIndexSummary): GifIndexStatus {
+  if (status.running || status.phase === "error" || !summary.exists) {
+    return status;
+  }
+
+  return {
+    ...status,
+    completedAt: summary.scannedAt,
+    currentPath: "",
+    discoveredFiles: summary.count,
+    indexedFiles: summary.count,
+    message: `Indexed ${formatNumber(summary.count)} GIFs`,
+    phase: "ready",
+    progress: 100,
+    rootLabel: summary.rootLabel,
+    totalFiles: summary.count,
+    updatedAt: summary.scannedAt,
+  };
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
