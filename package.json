@@ -1,0 +1,39 @@
+{
+  "name": "giflab-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local GIF archive studio with color editing, stroke controls, previews, and GIF export options.",
+  "keywords": [
+    "gif",
+    "archive",
+    "color-editor",
+    "nextjs",
+    "sharp"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm run build"
+  },
+  "dependencies": {
+    "lucide-react": "^1.6.0",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "typescript": "^5"
+  }
+}
