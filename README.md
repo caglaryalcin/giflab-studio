@@ -61,3 +61,21 @@ docker run --rm -p 3000:3000 `
 ```
 
 The container reads GIFs from `/app/public/gif-archive`, mapped from your local `public\gif-archive` folder. It stores the catalog manifest, poster cache, color analysis, and preview data in `/app/data/cache`.
+
+## Kubernetes
+
+Apply the included manifest:
+
+```bash
+kubectl apply -f deploy/kubernetes/giflab.yaml
+```
+
+The manifest creates one RWX PVC and mounts it into:
+
+```text
+/app/public/gif-archive
+/app/data/cache
+/app/data/collections
+```
+
+If the GHCR package is private, create an image pull secret and add it under `spec.template.spec.imagePullSecrets`.
