@@ -56,10 +56,17 @@ type CollectionDialogMode = "add" | "create";
 type CatalogPageRequest = {
   append: boolean;
   category: string;
+  cacheKey?: string;
   forceRefresh?: boolean;
   offset: number;
   queryText: string;
   signal?: AbortSignal;
+};
+
+type CatalogPageCacheEntry = {
+  categories: GifCategorySummary[];
+  items: GifItem[];
+  total: number;
 };
 
 type GifArchiveAppProps = {
@@ -184,6 +191,8 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
   const previewCacheRef = useRef(new Map<string, GifPreviewFrameData>());
   const collectionsLoadedRef = useRef(false);
   const catalogRequestIdRef = useRef(0);
+  const catalogPageCacheRef = useRef(new Map<string, CatalogPageCacheEntry>());
+  const skipInitialCatalogRequestRef = useRef(true);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const skipNextCollectionSaveRef = useRef(false);
   const photoSeekDraggingRef = useRef(false);
@@ -191,6 +200,7 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
   const requestCatalogPage = useCallback(async ({
     append,
     category,
+    cacheKey,
     forceRefresh = false,
     offset,
     queryText,
@@ -198,6 +208,20 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
   }: CatalogPageRequest) => {
     const requestId = catalogRequestIdRef.current + 1;
     catalogRequestIdRef.current = requestId;
+
+    if (!append && !forceRefresh && cacheKey) {
+      const cachedPage = catalogPageCacheRef.current.get(cacheKey);
+
+      if (cachedPage) {
+        setItems(cachedPage.items);
+        setCategories(cachedPage.categories);
+        setTotal(cachedPage.total);
+        setLoading(false);
+        setLoadingMore(false);
+        setError("");
+        return;
+      }
+    }
 
     if (append) {
       setLoadingMore(true);
@@ -234,8 +258,21 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
       setItems((currentItems) =>
         append ? mergeCatalogItems(currentItems, data.items) : data.items,
       );
-      setCategories(readCatalogCategories(data, data.items));
+      const nextCategories = readCatalogCategories(data, data.items);
+      setCategories(nextCategories);
       setTotal(data.total);
+
+      if (!append && !forceRefresh && cacheKey) {
+        rememberCatalogPage(
+          catalogPageCacheRef.current,
+          cacheKey,
+          {
+            categories: nextCategories,
+            items: data.items,
+            total: data.total,
+          },
+        );
+      }
     } catch (requestError) {
       if (!signal?.aborted && requestId === catalogRequestIdRef.current) {
         setError(requestError instanceof Error ? requestError.message : "Catalog request failed");
@@ -371,11 +408,19 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
   }, [activeCollectionId, collectionItemsById, collections]);
 
   useEffect(() => {
+    if (skipInitialCatalogRequestRef.current && !activeCategory && !query.trim()) {
+      skipInitialCatalogRequestRef.current = false;
+      return undefined;
+    }
+
+    skipInitialCatalogRequestRef.current = false;
+
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       await requestCatalogPage({
         append: false,
         category: activeCategory,
+        cacheKey: createCatalogPageCacheKey(activeCategory, query.trim()),
         offset: 0,
         queryText: query.trim(),
         signal: controller.signal,
@@ -954,6 +999,7 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
               aria-label="Refresh catalog"
               className="gif-square-button"
               onClick={() => {
+                catalogPageCacheRef.current.clear();
                 void requestCatalogPage({
                   append: false,
                   category: activeCategory,
@@ -1127,7 +1173,7 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
           <section className="gif-results" aria-label="GIF catalog">
             <div className="gif-results__header">
               <div>
-                <span className="gif-kicker">{loading ? "Indexing" : "Catalog"}</span>
+                <span className="gif-kicker">{loading ? "Loading" : "Catalog"}</span>
                 <h1>
                   {showCollectionOnly && activeCollection
                     ? formatCollectionTitle(activeCollection.name)
@@ -2468,6 +2514,27 @@ function readCatalogCategories(data: GifCatalogResponse, fallbackItems: GifItem[
   return Array.isArray(data.categories) && data.categories.length > 0
     ? data.categories
     : createCategorySummaries(fallbackItems);
+}
+
+function createCatalogPageCacheKey(category: string, query: string): string {
+  return `${category.trim().toLowerCase()}\u0000${query.trim().toLowerCase()}`;
+}
+
+function rememberCatalogPage(
+  cache: Map<string, CatalogPageCacheEntry>,
+  key: string,
+  entry: CatalogPageCacheEntry,
+): void {
+  const maxCachedCatalogPages = 24;
+
+  cache.delete(key);
+  cache.set(key, entry);
+
+  while (cache.size > maxCachedCatalogPages) {
+    const oldest = cache.keys().next().value;
+    if (!oldest) return;
+    cache.delete(oldest);
+  }
 }
 
 function createCategorySummaries(items: GifItem[]): GifCategorySummary[] {

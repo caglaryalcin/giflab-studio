@@ -2,6 +2,8 @@ import { GifArchiveApp } from "@/components/GifArchiveApp";
 import { variantRecipes } from "@/lib/color-variants";
 import { getGifCatalog } from "@/lib/gif-catalog";
 
+export const dynamic = "force-dynamic";
+
 const initialCatalogLimit = 120;
 
 export default async function Home() {

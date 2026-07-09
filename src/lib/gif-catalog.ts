@@ -191,7 +191,9 @@ async function loadArchive(options: LoadArchiveOptions = {}): Promise<ArchiveCac
   const usesFileProxy = !isInside(root, publicRoot);
   const manifest = options.force
     ? null
-    : await readArchiveManifest(root, publicRoot, rootLabel, usesFileProxy, now);
+    : await readArchiveManifest(root, publicRoot, rootLabel, usesFileProxy, now, {
+      ignoreTtl: true,
+    });
 
   if (manifest) {
     archiveCache = manifest;
