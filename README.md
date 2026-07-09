@@ -55,3 +55,13 @@ docker run --rm -p 3000:3000 `
 ```
 
 The container reads GIFs from `/app/public/gif-archive`, mapped from your local `public\gif-archive` folder. It stores the catalog manifest, poster cache, color analysis, and preview data in `/app/data/cache`.
+
+## Poster Cache
+
+GIF posters are generated on demand by default. To pre-generate posters during a manual re-index, set:
+
+```text
+GIF_POSTER_PREWARM=1
+```
+
+For large archives this uses extra CPU, memory, and cache storage. Keep `GIF_POSTER_WARM_BATCH_SIZE` low on small containers; the default is `1`.

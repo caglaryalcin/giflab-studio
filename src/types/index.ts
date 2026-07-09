@@ -55,7 +55,15 @@ export interface CatalogQuery {
   limit?: number;
 }
 
-export type GifIndexPhase = "idle" | "discovering" | "indexing" | "warming" | "writing" | "ready" | "error";
+export type GifIndexPhase =
+  | "idle"
+  | "discovering"
+  | "indexing"
+  | "warming"
+  | "writing"
+  | "paused"
+  | "ready"
+  | "error";
 
 export interface GifIndexStatus {
   completedAt: string;

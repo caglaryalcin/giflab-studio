@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { demoCatalogItems } from "@/lib/demo-catalog";
 import { getGifCacheFile, writeCacheFile } from "@/lib/gif-cache";
@@ -79,20 +79,37 @@ type DiscoveredGifFile = {
   relativePath: string;
 };
 
+type ArchiveScanCheckpointPhase = "discovering" | "indexing";
+
+type ArchiveScanCheckpoint = {
+  discoveredFiles: DiscoveredGifFile[];
+  indexedFiles: number;
+  items: ArchiveManifestItem[];
+  phase: ArchiveScanCheckpointPhase;
+  publicRoot: string;
+  remainingDirectories: string[];
+  root: string;
+  rootLabel: string;
+  scannedDirectories: number;
+  version: number;
+};
+
 type LoadArchiveOptions = {
   force?: boolean;
   onProgress?: (progress: ArchiveScanProgress) => void;
+  shouldPause?: () => boolean;
   warmPosters?: boolean;
 };
 
 const gifExtension = ".gif";
 const manifestVersion = 2;
+const checkpointVersion = 1;
 const defaultLimit = 72;
 const maxLimit = 240;
 const cacheMs = Number.parseInt(process.env.GIF_CATALOG_CACHE_MS ?? "30000", 10);
 const indexTtlMs = readPositiveIntegerEnv("GIF_CATALOG_INDEX_TTL_MS", 600000, 5000);
 const indexBatchSize = readPositiveIntegerEnv("GIF_CATALOG_INDEX_BATCH_SIZE", 48, 1);
-const posterWarmBatchSize = readPositiveIntegerEnv("GIF_POSTER_WARM_BATCH_SIZE", 6, 1);
+const posterWarmBatchSize = readPositiveIntegerEnv("GIF_POSTER_WARM_BATCH_SIZE", 1, 1);
 let archiveCache: ArchiveCache | null = null;
 
 export async function getGifCatalog(query: CatalogQuery = {}): Promise<GifCatalogResponse> {
@@ -142,8 +159,9 @@ export async function findGifFileById(id: string): Promise<ArchiveItem | null> {
 
 export async function refreshGifArchive(
   onProgress?: (progress: ArchiveScanProgress) => void,
+  shouldPause?: () => boolean,
 ): Promise<ArchiveIndexResult> {
-  const archive = await loadArchive({ force: true, onProgress, warmPosters: true });
+  const archive = await loadArchive({ force: true, onProgress, shouldPause, warmPosters: true });
 
   return {
     count: archive.items.length,
@@ -206,7 +224,14 @@ async function loadArchive(options: LoadArchiveOptions = {}): Promise<ArchiveCac
     return manifest;
   }
 
-  const scan = await scanArchive(root, publicRoot, rootLabel, usesFileProxy, options.onProgress);
+  const scan = await scanArchive(
+    root,
+    publicRoot,
+    rootLabel,
+    usesFileProxy,
+    options.onProgress,
+    options.shouldPause,
+  );
   if (options.warmPosters) {
     await warmPosterCache(scan.items, rootLabel, scan.discoveredFiles, scan.scannedDirectories, options.onProgress);
   }
@@ -231,6 +256,7 @@ async function loadArchive(options: LoadArchiveOptions = {}): Promise<ArchiveCac
 
   archiveCache = nextCache;
   await writeArchiveManifest(nextCache);
+  await removeArchiveCheckpoint(root);
   return nextCache;
 }
 
@@ -241,7 +267,7 @@ async function warmPosterCache(
   scannedDirectories: number,
   onProgress?: (progress: ArchiveScanProgress) => void,
 ): Promise<void> {
-  if (items.length === 0 || process.env.GIF_POSTER_PREWARM === "0") return;
+  if (items.length === 0 || process.env.GIF_POSTER_PREWARM !== "1") return;
 
   let completed = 0;
 
@@ -276,6 +302,7 @@ async function scanArchive(
   rootLabel: string,
   usesFileProxy: boolean,
   onProgress?: (progress: ArchiveScanProgress) => void,
+  shouldPause?: () => boolean,
 ): Promise<ArchiveScanResult> {
   const rootStats = await safeStat(root);
 
@@ -299,12 +326,15 @@ async function scanArchive(
     };
   }
 
-  const discoveredFiles: DiscoveredGifFile[] = [];
-  const items: ArchiveItem[] = [];
-  const stack = [root];
-  let scannedDirectories = 0;
+  const checkpoint = await readArchiveCheckpoint(root, publicRoot, rootLabel);
+  const discoveredFiles: DiscoveredGifFile[] = checkpoint?.discoveredFiles ?? [];
+  const items: ArchiveItem[] = checkpoint?.items.map((item) =>
+    hydrateManifestItem(item, root, publicRoot, usesFileProxy)
+  ) ?? [];
+  const stack = checkpoint?.phase === "discovering" ? [...checkpoint.remainingDirectories] : [root];
+  let scannedDirectories = checkpoint?.scannedDirectories ?? 0;
 
-  while (stack.length > 0) {
+  while (checkpoint?.phase !== "indexing" && stack.length > 0) {
     const current = stack.pop();
     if (!current) continue;
 
@@ -340,11 +370,40 @@ async function scanArchive(
       scannedDirectories,
       totalFiles: 0,
     });
+
+    await writeArchiveCheckpoint({
+      discoveredFiles,
+      indexedFiles: 0,
+      items: [],
+      phase: "discovering",
+      publicRoot,
+      remainingDirectories: stack,
+      root,
+      rootLabel,
+      scannedDirectories,
+      version: checkpointVersion,
+    });
+    throwIfPaused(shouldPause);
   }
 
-  let indexedFiles = 0;
+  await writeArchiveCheckpoint({
+    discoveredFiles,
+    indexedFiles: checkpoint?.indexedFiles ?? items.length,
+    items: items.map(toManifestItem),
+    phase: "indexing",
+    publicRoot,
+    remainingDirectories: [],
+    root,
+    rootLabel,
+    scannedDirectories,
+    version: checkpointVersion,
+  });
+
+  let indexedFiles = checkpoint?.indexedFiles ?? items.length;
 
   for (let index = 0; index < discoveredFiles.length; index += indexBatchSize) {
+    if (index < indexedFiles) continue;
+
     const batch = discoveredFiles.slice(index, index + indexBatchSize);
     const fileItems = await Promise.all(batch.map((file) =>
       createArchiveItem(file, publicRoot, usesFileProxy),
@@ -363,6 +422,20 @@ async function scanArchive(
       scannedDirectories,
       totalFiles: discoveredFiles.length,
     });
+
+    await writeArchiveCheckpoint({
+      discoveredFiles,
+      indexedFiles,
+      items: items.map(toManifestItem),
+      phase: "indexing",
+      publicRoot,
+      remainingDirectories: [],
+      root,
+      rootLabel,
+      scannedDirectories,
+      version: checkpointVersion,
+    });
+    throwIfPaused(shouldPause);
   }
 
   return {
@@ -431,15 +504,7 @@ async function readArchiveManifest(
 
 async function writeArchiveManifest(archive: ArchiveCache): Promise<void> {
   const manifest: ArchiveManifest = {
-    items: archive.items.map((item) => ({
-      bytes: item.bytes,
-      category: item.category,
-      fileName: item.fileName,
-      id: item.id,
-      relativePath: item.relativePath,
-      title: item.title,
-      updatedAt: item.updatedAt,
-    })),
+    items: archive.items.map(toManifestItem),
     publicRoot: archive.publicRoot,
     root: archive.root,
     rootLabel: archive.rootLabel,
@@ -452,6 +517,166 @@ async function writeArchiveManifest(archive: ArchiveCache): Promise<void> {
   } catch {
     // The app can still run with in-memory results when the cache volume is not writable.
   }
+}
+
+async function readArchiveCheckpoint(
+  root: string,
+  publicRoot: string,
+  rootLabel: string,
+): Promise<ArchiveScanCheckpoint | null> {
+  try {
+    const checkpoint = parseArchiveCheckpoint(await readFile(getArchiveCheckpointPath(root), "utf8"));
+
+    if (!checkpoint) return null;
+    if (checkpoint.root !== root || checkpoint.publicRoot !== publicRoot || checkpoint.rootLabel !== rootLabel) {
+      return null;
+    }
+
+    return checkpoint;
+  } catch {
+    return null;
+  }
+}
+
+async function writeArchiveCheckpoint(checkpoint: ArchiveScanCheckpoint): Promise<void> {
+  try {
+    await writeCacheFile(getArchiveCheckpointPath(checkpoint.root), JSON.stringify(checkpoint));
+  } catch {
+    // Resume is best-effort; indexing can still complete without a writable checkpoint.
+  }
+}
+
+async function removeArchiveCheckpoint(root: string): Promise<void> {
+  try {
+    await unlink(getArchiveCheckpointPath(root));
+  } catch {
+    // Missing checkpoint is fine after a clean index write.
+  }
+}
+
+function getArchiveCheckpointPath(root: string): string {
+  return getGifCacheFile("catalog", `checkpoint:${root}`, "json");
+}
+
+function parseArchiveCheckpoint(raw: string): ArchiveScanCheckpoint | null {
+  const value = JSON.parse(raw) as unknown;
+  const record = toRecord(value);
+
+  if (!record) return null;
+  if (record.version !== checkpointVersion) return null;
+
+  const root = record.root;
+  const publicRoot = record.publicRoot;
+  const rootLabel = record.rootLabel;
+  const phase = record.phase;
+  const discoveredFiles = record.discoveredFiles;
+  const indexedFiles = record.indexedFiles;
+  const items = record.items;
+  const remainingDirectories = record.remainingDirectories;
+  const scannedDirectories = record.scannedDirectories;
+
+  if (
+    typeof root !== "string" ||
+    typeof publicRoot !== "string" ||
+    typeof rootLabel !== "string" ||
+    (phase !== "discovering" && phase !== "indexing") ||
+    typeof indexedFiles !== "number" ||
+    !Number.isFinite(indexedFiles) ||
+    typeof scannedDirectories !== "number" ||
+    !Number.isFinite(scannedDirectories) ||
+    !Array.isArray(discoveredFiles) ||
+    !Array.isArray(items) ||
+    !Array.isArray(remainingDirectories)
+  ) {
+    return null;
+  }
+
+  return {
+    discoveredFiles: discoveredFiles.flatMap((item) => {
+      const parsed = parseDiscoveredGifFile(item);
+      return parsed ? [parsed] : [];
+    }),
+    indexedFiles: Math.max(0, indexedFiles),
+    items: items.flatMap((item) => {
+      const parsed = parseArchiveManifestItem(item);
+      return parsed ? [parsed] : [];
+    }),
+    phase,
+    publicRoot,
+    remainingDirectories: remainingDirectories.filter((item): item is string => typeof item === "string"),
+    root,
+    rootLabel,
+    scannedDirectories: Math.max(0, scannedDirectories),
+    version: checkpointVersion,
+  };
+}
+
+export async function getArchiveIndexCheckpointSummary(): Promise<{
+  discoveredFiles: number;
+  exists: boolean;
+  indexedFiles: number;
+  rootLabel: string;
+  scannedDirectories: number;
+}> {
+  const { root, publicRoot, rootLabel } = getArchiveRoots();
+  const checkpoint = await readArchiveCheckpoint(root, publicRoot, rootLabel);
+
+  if (!checkpoint) {
+    return {
+      discoveredFiles: 0,
+      exists: false,
+      indexedFiles: 0,
+      rootLabel,
+      scannedDirectories: 0,
+    };
+  }
+
+  return {
+    discoveredFiles: checkpoint.discoveredFiles.length,
+    exists: true,
+    indexedFiles: checkpoint.indexedFiles,
+    rootLabel,
+    scannedDirectories: checkpoint.scannedDirectories,
+  };
+}
+
+function parseDiscoveredGifFile(value: unknown): DiscoveredGifFile | null {
+  const record = toRecord(value);
+  if (!record) return null;
+
+  const absolutePath = record.absolutePath;
+  const fileName = record.fileName;
+  const relativePath = record.relativePath;
+
+  if (typeof absolutePath !== "string" || typeof fileName !== "string" || typeof relativePath !== "string") {
+    return null;
+  }
+
+  return {
+    absolutePath,
+    fileName,
+    relativePath,
+  };
+}
+
+function toManifestItem(item: ArchiveItem): ArchiveManifestItem {
+  return {
+    bytes: item.bytes,
+    category: item.category,
+    fileName: item.fileName,
+    id: item.id,
+    relativePath: item.relativePath,
+    title: item.title,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function throwIfPaused(shouldPause?: () => boolean): void {
+  if (!shouldPause?.()) return;
+
+  const error = new Error("Index paused");
+  error.name = "ArchiveIndexPausedError";
+  throw error;
 }
 
 function hydrateManifestItem(

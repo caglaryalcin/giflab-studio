@@ -10,6 +10,8 @@ import {
   FolderSearch,
   HardDrive,
   Moon,
+  Pause,
+  Play,
   RefreshCw,
   Sun,
 } from "lucide-react";
@@ -98,6 +100,7 @@ export function GifArchiveStatusPage() {
   );
   const isIndeterminate = status.running && status.totalFiles === 0;
   const canStart = !status.running && !starting;
+  const canPause = status.running && !starting;
 
   async function startIndexing() {
     setStarting(true);
@@ -124,6 +127,35 @@ export function GifArchiveStatusPage() {
     }
   }
 
+  async function pauseIndexing() {
+    setStarting(true);
+    setRequestError("");
+
+    try {
+      const response = await fetch("/api/gifs/index", {
+        body: JSON.stringify({ action: "pause" }),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Pause request failed: ${response.status}`);
+      }
+
+      const nextData = (await response.json()) as GifIndexStatusResponse;
+      setData(nextData);
+      setRequestState("idle");
+    } catch (error) {
+      setRequestState("error");
+      setRequestError(error instanceof Error ? error.message : "Pause request failed");
+    } finally {
+      setStarting(false);
+    }
+  }
+
   return (
     <div className="gif-app gif-status-app" data-theme={theme}>
       <header className="gif-topbar gif-status-topbar">
@@ -144,12 +176,12 @@ export function GifArchiveStatusPage() {
           </Link>
           <button
             className="gif-status-primary"
-            disabled={!canStart}
-            onClick={startIndexing}
+            disabled={status.running ? !canPause : !canStart}
+            onClick={status.running ? pauseIndexing : startIndexing}
             type="button"
           >
-            {status.running || starting ? <RefreshCw className="is-spinning" size={17} /> : <FolderSearch size={17} />}
-            <span>{status.running ? "Indexing" : "Re-index"}</span>
+            {starting ? <RefreshCw className="is-spinning" size={17} /> : getPrimaryActionIcon(status)}
+            <span>{getPrimaryActionLabel(status, starting)}</span>
           </button>
           <button
             aria-label={theme === "dark" ? "Use light mode" : "Use dark mode"}
@@ -253,6 +285,15 @@ function StatusBadge({ status, summary }: { status: GifIndexStatus; summary: Gif
     );
   }
 
+  if (status.phase === "paused") {
+    return (
+      <span className="gif-status-badge">
+        <Pause size={16} />
+        Paused
+      </span>
+    );
+  }
+
   if (summary.exists && !summary.stale) {
     return (
       <span className="gif-status-badge is-ready">
@@ -333,7 +374,7 @@ function createEmptySummary(): GifIndexSummary {
 }
 
 function normalizeDisplayStatus(status: GifIndexStatus, summary: GifIndexSummary): GifIndexStatus {
-  if (status.running || status.phase === "error" || !summary.exists) {
+  if (status.running || status.phase === "paused" || status.phase === "error" || !summary.exists) {
     return status;
   }
 
@@ -361,9 +402,24 @@ function formatPhase(status: GifIndexStatus): string {
   if (status.phase === "indexing") return "Indexing";
   if (status.phase === "warming") return "Preparing posters";
   if (status.phase === "writing") return "Saving";
+  if (status.phase === "paused") return "Paused";
   if (status.phase === "ready") return "Ready";
   if (status.phase === "error") return "Error";
   return "Idle";
+}
+
+function getPrimaryActionIcon(status: GifIndexStatus) {
+  if (status.running) return <Pause size={17} />;
+  if (status.phase === "paused") return <Play size={17} />;
+  return <FolderSearch size={17} />;
+}
+
+function getPrimaryActionLabel(status: GifIndexStatus, starting: boolean): string {
+  if (starting && status.running) return "Pausing";
+  if (starting) return "Starting";
+  if (status.running) return "Pause";
+  if (status.phase === "paused") return "Resume";
+  return "Re-index";
 }
 
 function formatIndexedValue(status: GifIndexStatus, summary: GifIndexSummary): string {

@@ -4,6 +4,7 @@ import { getGifCacheFile, writeCacheFile } from "@/lib/gif-cache";
 import type { GifIndexStatus } from "@/types";
 
 type GifIndexState = {
+  pauseRequested: boolean;
   promise: Promise<GifIndexStatus> | null;
   status: GifIndexStatus;
 };
@@ -25,6 +26,7 @@ const globalIndexState = globalThis as typeof globalThis & {
 const statusSnapshotStaleMs = 30000;
 
 const indexState = globalIndexState.__giflabIndexState ?? {
+  pauseRequested: false,
   promise: null,
   status: createIdleStatus(),
 };
@@ -33,6 +35,26 @@ globalIndexState.__giflabIndexState = indexState;
 
 export function getGifIndexStatus(): GifIndexStatus {
   return cloneStatus(indexState.status);
+}
+
+export function isGifIndexPauseRequested(): boolean {
+  return indexState.pauseRequested;
+}
+
+export function requestGifIndexPause(): GifIndexStatus {
+  indexState.pauseRequested = true;
+
+  if (!indexState.status.running) {
+    return getGifIndexStatus();
+  }
+
+  setStatus({
+    ...indexState.status,
+    message: "Pausing index",
+    updatedAt: new Date().toISOString(),
+  });
+
+  return getGifIndexStatus();
 }
 
 export async function getLatestGifIndexStatus(): Promise<GifIndexStatus> {
@@ -54,6 +76,7 @@ export function startGifIndexJob(job: GifIndexJob): GifIndexJobStart {
     };
   }
 
+  indexState.pauseRequested = false;
   const startedAt = new Date().toISOString();
   setStatus({
     ...createIdleStatus(),
@@ -92,6 +115,22 @@ export function startGifIndexJob(job: GifIndexJob): GifIndexJobStart {
     })
     .catch((error: unknown) => {
       const now = new Date().toISOString();
+      if (isIndexPausedError(error)) {
+        const status: GifIndexStatus = {
+          ...indexState.status,
+          completedAt: "",
+          durationMs: getDurationMs(startedAt, now),
+          error: "",
+          message: "Index paused",
+          phase: "paused",
+          running: false,
+          updatedAt: now,
+        };
+
+        setStatus(status);
+        return getGifIndexStatus();
+      }
+
       const status: GifIndexStatus = {
         ...indexState.status,
         completedAt: now,
@@ -107,6 +146,7 @@ export function startGifIndexJob(job: GifIndexJob): GifIndexJobStart {
       return getGifIndexStatus();
     })
     .finally(() => {
+      indexState.pauseRequested = false;
       indexState.promise = null;
     });
 
@@ -192,6 +232,10 @@ function setStatus(status: GifIndexStatus): void {
   void writePersistedStatus(status);
 }
 
+function isIndexPausedError(error: unknown): boolean {
+  return error instanceof Error && error.name === "ArchiveIndexPausedError";
+}
+
 async function readPersistedStatus(): Promise<GifIndexStatus | null> {
   try {
     return parsePersistedStatus(await readFile(getStatusSnapshotPath(), "utf8"));
@@ -266,6 +310,7 @@ function readPhase(value: unknown): GifIndexStatus["phase"] {
     value === "indexing" ||
     value === "warming" ||
     value === "writing" ||
+    value === "paused" ||
     value === "ready" ||
     value === "error" ||
     value === "idle"
