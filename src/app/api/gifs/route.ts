@@ -10,19 +10,7 @@ export async function GET(request: NextRequest) {
 
   if (refresh) {
     const job = startGifIndexJob((reportProgress) => refreshGifArchive(reportProgress));
-    const status = await job.promise;
-
-    if (status.phase === "error") {
-      return Response.json(
-        { error: status.error || "Catalog refresh failed" },
-        {
-          status: 500,
-          headers: {
-            "Cache-Control": "no-store",
-          },
-        },
-      );
-    }
+    void job.promise;
   }
 
   const response = await getGifCatalog({

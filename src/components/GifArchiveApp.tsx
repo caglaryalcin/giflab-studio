@@ -190,7 +190,10 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
   const analysisCacheRef = useRef(new Map<string, GifColorAnalysis>());
   const previewCacheRef = useRef(new Map<string, GifPreviewFrameData>());
   const collectionsLoadedRef = useRef(false);
-  const catalogRequestIdRef = useRef(0);
+  const catalogReplaceRequestIdRef = useRef(0);
+  const catalogAppendRequestIdRef = useRef(0);
+  const catalogReplaceInFlightRef = useRef(false);
+  const catalogAppendInFlightRef = useRef(false);
   const catalogPageCacheRef = useRef(new Map<string, CatalogPageCacheEntry>());
   const skipInitialCatalogRequestRef = useRef(true);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -206,8 +209,29 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
     queryText,
     signal,
   }: CatalogPageRequest) => {
-    const requestId = catalogRequestIdRef.current + 1;
-    catalogRequestIdRef.current = requestId;
+    if (append && (catalogReplaceInFlightRef.current || catalogAppendInFlightRef.current)) {
+      return;
+    }
+
+    const requestId = append
+      ? catalogAppendRequestIdRef.current + 1
+      : catalogReplaceRequestIdRef.current + 1;
+
+    if (append) {
+      catalogAppendRequestIdRef.current = requestId;
+      catalogAppendInFlightRef.current = true;
+    } else {
+      catalogReplaceRequestIdRef.current = requestId;
+      catalogReplaceInFlightRef.current = true;
+      catalogAppendRequestIdRef.current += 1;
+      catalogAppendInFlightRef.current = false;
+      setLoadingMore(false);
+    }
+
+    const isCurrentRequest = () =>
+      append
+        ? requestId === catalogAppendRequestIdRef.current && !catalogReplaceInFlightRef.current
+        : requestId === catalogReplaceRequestIdRef.current;
 
     if (!append && !forceRefresh && cacheKey) {
       const cachedPage = catalogPageCacheRef.current.get(cacheKey);
@@ -219,6 +243,7 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
         setLoading(false);
         setLoadingMore(false);
         setError("");
+        catalogReplaceInFlightRef.current = false;
         return;
       }
     }
@@ -253,7 +278,7 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
 
       const data = (await response.json()) as GifCatalogResponse;
 
-      if (signal?.aborted || requestId !== catalogRequestIdRef.current) return;
+      if (signal?.aborted || !isCurrentRequest()) return;
 
       setItems((currentItems) =>
         append ? mergeCatalogItems(currentItems, data.items) : data.items,
@@ -274,14 +299,16 @@ export function GifArchiveApp({ initialCategories, initialItems, initialTotal }:
         );
       }
     } catch (requestError) {
-      if (!signal?.aborted && requestId === catalogRequestIdRef.current) {
+      if (!signal?.aborted && isCurrentRequest()) {
         setError(requestError instanceof Error ? requestError.message : "Catalog request failed");
       }
     } finally {
-      if (!signal?.aborted && requestId === catalogRequestIdRef.current) {
+      if (!signal?.aborted && isCurrentRequest()) {
         if (append) {
+          catalogAppendInFlightRef.current = false;
           setLoadingMore(false);
         } else {
+          catalogReplaceInFlightRef.current = false;
           setLoading(false);
         }
       }

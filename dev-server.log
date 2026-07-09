@@ -5,21 +5,16 @@
 ▲ Next.js 16.2.1 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://169.254.83.107:3000
-✓ Ready in 308ms
+✓ Ready in 726ms
 
- GET / 200 in 1004ms (next.js: 867ms, application-code: 137ms)
- GET / 200 in 33ms (next.js: 3ms, application-code: 30ms)
- GET /api/gifs/index 200 in 142ms (next.js: 129ms, application-code: 13ms)
- GET /api/gifs?limit=1 200 in 80ms (next.js: 69ms, application-code: 11ms)
- GET /api/gifs?limit=1 200 in 5ms (next.js: 1630µs, application-code: 3ms)
- GET / 200 in 29ms (next.js: 2ms, application-code: 26ms)
- GET / 200 in 84ms (next.js: 28ms, application-code: 56ms)
- GET / 200 in 98ms (next.js: 37ms, application-code: 61ms)
- GET / 200 in 42ms (next.js: 2ms, application-code: 40ms)
- GET /api/collections 200 in 7ms (next.js: 2ms, application-code: 4ms)
- GET /api/gifs?limit=120&offset=0 200 in 9ms (next.js: 1702µs, application-code: 7ms)
-✓ Compiled in 45ms
- GET /api/gifs?limit=120&offset=0 200 in 6ms (next.js: 1947µs, application-code: 4ms)
- GET / 200 in 100ms (next.js: 35ms, application-code: 65ms)
- GET /api/collections 200 in 6ms (next.js: 1912µs, application-code: 4ms)
- GET /api/gifs?limit=120&offset=0 200 in 7ms (next.js: 1785µs, application-code: 5ms)
+ GET /api/gifs?limit=5&offset=0&category=Logo 200 in 254ms (next.js: 213ms, application-code: 41ms)
+ GET /api/gifs/index 200 in 265ms (next.js: 239ms, application-code: 26ms)
+ GET /api/gifs?limit=5&offset=0&category=Arrow 200 in 21ms (next.js: 9ms, application-code: 12ms)
+ GET / 200 in 216ms (next.js: 69ms, application-code: 146ms)
+ GET /api/collections 200 in 21ms (next.js: 16ms, application-code: 5ms)
+ GET /api/gifs?limit=120&offset=0&category=Communication 200 in 8ms (next.js: 2ms, application-code: 6ms)
+ GET /api/gifs/index 200 in 5ms (next.js: 1664µs, application-code: 4ms)
+ GET /api/gifs?limit=5&offset=0&refresh=1 200 in 26ms (next.js: 20ms, application-code: 6ms)
+ GET / 200 in 44ms (next.js: 3ms, application-code: 41ms)
+ GET /api/collections 200 in 5ms (next.js: 1836µs, application-code: 3ms)
+ GET /api/gifs?limit=120&offset=0&refresh=1 200 in 6ms (next.js: 1883µs, application-code: 4ms)
