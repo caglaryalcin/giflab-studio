@@ -94,9 +94,9 @@ let archiveCache: ArchiveCache | null = null;
 
 export async function getGifCatalog(query: CatalogQuery = {}): Promise<GifCatalogResponse> {
   const archive = await loadArchive({ force: query.refresh === true });
-  const hasArchiveItems = archive.items.length > 0;
-  const sourceItems: GifItem[] = hasArchiveItems ? archive.items.map(stripInternalFields) : demoCatalogItems;
-  const source = createSource(archive, hasArchiveItems);
+  const usingDemoCatalog = shouldUseDemoCatalog(archive);
+  const sourceItems: GifItem[] = usingDemoCatalog ? demoCatalogItems : archive.items.map(stripInternalFields);
+  const source = createSource(archive, usingDemoCatalog);
   const normalizedQuery = query.query?.trim().toLowerCase() ?? "";
   const normalizedCategory = query.category?.trim() ?? "";
   const limit = clampNumber(query.limit ?? defaultLimit, 1, maxLimit);
@@ -515,13 +515,19 @@ function getArchiveRoots(): { root: string; publicRoot: string; rootLabel: strin
   };
 }
 
-function createSource(archive: ArchiveCache, hasArchiveItems: boolean): GifCatalogSource {
+function createSource(archive: ArchiveCache, usingDemoCatalog: boolean): GifCatalogSource {
   return {
-    mode: hasArchiveItems ? "archive" : "demo",
+    mode: usingDemoCatalog ? "demo" : "archive",
     rootLabel: archive.rootLabel,
     usesFileProxy: archive.usesFileProxy,
     scannedAt: new Date(archive.scannedAt).toISOString(),
   };
+}
+
+function shouldUseDemoCatalog(archive: ArchiveCache): boolean {
+  return archive.items.length === 0 &&
+    process.env.NODE_ENV !== "production" &&
+    !process.env.GIF_ARCHIVE_DIR?.trim();
 }
 
 function stripInternalFields(item: ArchiveItem): GifItem {

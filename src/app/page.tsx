@@ -1,7 +1,18 @@
 import { GifArchiveApp } from "@/components/GifArchiveApp";
 import { variantRecipes } from "@/lib/color-variants";
-import { demoCatalogItems } from "@/lib/demo-catalog";
+import { getGifCatalog } from "@/lib/gif-catalog";
 
-export default function Home() {
-  return <GifArchiveApp initialItems={demoCatalogItems} variants={variantRecipes} />;
+const initialCatalogLimit = 120;
+
+export default async function Home() {
+  const catalog = await getGifCatalog({ limit: initialCatalogLimit });
+
+  return (
+    <GifArchiveApp
+      initialCategories={catalog.categories}
+      initialItems={catalog.items}
+      initialTotal={catalog.total}
+      variants={variantRecipes}
+    />
+  );
 }

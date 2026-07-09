@@ -63,7 +63,9 @@ type CatalogPageRequest = {
 };
 
 type GifArchiveAppProps = {
+  initialCategories?: GifCategorySummary[];
   initialItems: GifItem[];
+  initialTotal?: number;
   variants: VariantRecipe[];
 };
 
@@ -130,12 +132,14 @@ const clientAnalysisCacheLimit = 80;
 const clientPreviewCacheLimit = 20;
 const catalogPageSize = 120;
 
-export function GifArchiveApp({ initialItems }: GifArchiveAppProps) {
+export function GifArchiveApp({ initialCategories, initialItems, initialTotal }: GifArchiveAppProps) {
   const [items, setItems] = useState<GifItem[]>(initialItems);
-  const [total, setTotal] = useState(initialItems.length);
+  const [total, setTotal] = useState(initialTotal ?? initialItems.length);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("");
-  const [categories, setCategories] = useState<GifCategorySummary[]>(() => createCategorySummaries(initialItems));
+  const [categories, setCategories] = useState<GifCategorySummary[]>(
+    () => initialCategories ?? createCategorySummaries(initialItems),
+  );
   const [selectedId, setSelectedId] = useState("");
   const [collections, setCollections] = useState<GifCollection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState("");
