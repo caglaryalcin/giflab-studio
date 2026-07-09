@@ -1944,10 +1944,11 @@ type NumberStepperProps = {
 function HoverAnimatedGif({ isAnimating, item }: HoverAnimatedGifProps) {
   const [loadedImageSrc, setLoadedImageSrc] = useState("");
   const [posterFailed, setPosterFailed] = useState(false);
+  const [posterTimedOut, setPosterTimedOut] = useState(false);
 
   const posterVersion = encodeURIComponent(`${item.updatedAt}:${item.bytes}`);
   const posterSrc = item.origin === "archive" ? `/api/gifs/poster/${item.id}?v=${posterVersion}` : item.src;
-  const usePoster = item.origin === "archive" && !posterFailed && !isAnimating;
+  const usePoster = item.origin === "archive" && !posterFailed && !posterTimedOut && !isAnimating;
   const imageSrc = usePoster ? posterSrc : item.src;
   const imageLoaded = loadedImageSrc === imageSrc;
   const rememberLoadedImage = useCallback((node: HTMLImageElement | null) => {
@@ -1955,6 +1956,18 @@ function HoverAnimatedGif({ isAnimating, item }: HoverAnimatedGifProps) {
       setLoadedImageSrc(imageSrc);
     }
   }, [imageSrc]);
+
+  useEffect(() => {
+    if (!usePoster) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setPosterTimedOut(true);
+    }, 900);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [usePoster, posterSrc]);
 
   return (
     <>
