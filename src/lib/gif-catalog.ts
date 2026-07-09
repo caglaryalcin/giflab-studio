@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { demoCatalogItems } from "@/lib/demo-catalog";
 import { getGifCacheFile, writeCacheFile } from "@/lib/gif-cache";
+import { createGifPoster } from "@/lib/gif-variant";
 import type {
   CatalogQuery,
   GifCatalogResponse,
@@ -17,7 +18,7 @@ export type ArchiveItem = GifItem & {
   relativePath: string;
 };
 
-export type ArchiveScanPhase = "discovering" | "indexing" | "writing";
+export type ArchiveScanPhase = "discovering" | "indexing" | "warming" | "writing";
 
 export type ArchiveScanProgress = {
   currentPath: string;
@@ -81,6 +82,7 @@ type DiscoveredGifFile = {
 type LoadArchiveOptions = {
   force?: boolean;
   onProgress?: (progress: ArchiveScanProgress) => void;
+  warmPosters?: boolean;
 };
 
 const gifExtension = ".gif";
@@ -90,10 +92,14 @@ const maxLimit = 240;
 const cacheMs = Number.parseInt(process.env.GIF_CATALOG_CACHE_MS ?? "30000", 10);
 const indexTtlMs = readPositiveIntegerEnv("GIF_CATALOG_INDEX_TTL_MS", 600000, 5000);
 const indexBatchSize = readPositiveIntegerEnv("GIF_CATALOG_INDEX_BATCH_SIZE", 48, 1);
+const posterWarmBatchSize = readPositiveIntegerEnv("GIF_POSTER_WARM_BATCH_SIZE", 6, 1);
 let archiveCache: ArchiveCache | null = null;
 
 export async function getGifCatalog(query: CatalogQuery = {}): Promise<GifCatalogResponse> {
-  const archive = await loadArchive({ force: query.refresh === true });
+  const archive = await loadArchive({
+    force: query.refresh === true,
+    warmPosters: query.refresh === true,
+  });
   const usingDemoCatalog = shouldUseDemoCatalog(archive);
   const sourceItems: GifItem[] = usingDemoCatalog ? demoCatalogItems : archive.items.map(stripInternalFields);
   const source = createSource(archive, usingDemoCatalog);
@@ -137,7 +143,7 @@ export async function findGifFileById(id: string): Promise<ArchiveItem | null> {
 export async function refreshGifArchive(
   onProgress?: (progress: ArchiveScanProgress) => void,
 ): Promise<ArchiveIndexResult> {
-  const archive = await loadArchive({ force: true, onProgress });
+  const archive = await loadArchive({ force: true, onProgress, warmPosters: true });
 
   return {
     count: archive.items.length,
@@ -201,6 +207,9 @@ async function loadArchive(options: LoadArchiveOptions = {}): Promise<ArchiveCac
   }
 
   const scan = await scanArchive(root, publicRoot, rootLabel, usesFileProxy, options.onProgress);
+  if (options.warmPosters) {
+    await warmPosterCache(scan.items, rootLabel, scan.discoveredFiles, scan.scannedDirectories, options.onProgress);
+  }
   options.onProgress?.({
     currentPath: "catalog manifest",
     discoveredFiles: scan.discoveredFiles,
@@ -223,6 +232,42 @@ async function loadArchive(options: LoadArchiveOptions = {}): Promise<ArchiveCac
   archiveCache = nextCache;
   await writeArchiveManifest(nextCache);
   return nextCache;
+}
+
+async function warmPosterCache(
+  items: ArchiveItem[],
+  rootLabel: string,
+  discoveredFiles: number,
+  scannedDirectories: number,
+  onProgress?: (progress: ArchiveScanProgress) => void,
+): Promise<void> {
+  if (items.length === 0 || process.env.GIF_POSTER_PREWARM === "0") return;
+
+  let completed = 0;
+
+  for (let index = 0; index < items.length; index += posterWarmBatchSize) {
+    const batch = items.slice(index, index + posterWarmBatchSize);
+
+    await Promise.all(batch.map(async (item) => {
+      try {
+        await createGifPoster(item);
+      } catch {
+        // A broken GIF should not block the whole archive index.
+      }
+    }));
+
+    completed += batch.length;
+    onProgress?.({
+      currentPath: batch.at(-1)?.relativePath ?? "poster cache",
+      discoveredFiles,
+      indexedFiles: completed,
+      pendingDirectories: 0,
+      phase: "warming",
+      rootLabel,
+      scannedDirectories,
+      totalFiles: items.length,
+    });
+  }
 }
 
 async function scanArchive(

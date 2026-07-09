@@ -359,6 +359,7 @@ function normalizeDisplayStatus(status: GifIndexStatus, summary: GifIndexSummary
 function formatPhase(status: GifIndexStatus): string {
   if (status.phase === "discovering") return "Discovering";
   if (status.phase === "indexing") return "Indexing";
+  if (status.phase === "warming") return "Preparing posters";
   if (status.phase === "writing") return "Saving";
   if (status.phase === "ready") return "Ready";
   if (status.phase === "error") return "Error";

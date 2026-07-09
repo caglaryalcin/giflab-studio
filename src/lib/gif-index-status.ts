@@ -151,6 +151,10 @@ function createProgressMessage(progress: ArchiveScanProgress): string {
     return `Found ${formatNumber(progress.discoveredFiles)} GIFs`;
   }
 
+  if (progress.phase === "warming") {
+    return `Prepared ${formatNumber(progress.indexedFiles)} of ${formatNumber(progress.totalFiles)} posters`;
+  }
+
   if (progress.phase === "writing") {
     return "Writing catalog manifest";
   }
@@ -260,6 +264,7 @@ function getStatusTimestamp(status: GifIndexStatus): number {
 function readPhase(value: unknown): GifIndexStatus["phase"] {
   return value === "discovering" ||
     value === "indexing" ||
+    value === "warming" ||
     value === "writing" ||
     value === "ready" ||
     value === "error" ||
